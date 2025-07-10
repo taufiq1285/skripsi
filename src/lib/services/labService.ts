@@ -1,4 +1,4 @@
-// src/lib/services/labService.ts
+// src/lib/services/labService.ts - COMPLETE VERSION WITH CASCADE DELETE
 import { supabase } from '@/lib/supabase/client'
 import type { LabRoom, CreateLabRequest, UpdateLabRequest, LabListParams, LabListResponse } from '@/types/lab'
 
@@ -208,7 +208,7 @@ class LabService {
   }
 
   /**
-   * Delete lab
+   * Delete lab with automatic cascade - FIXED VERSION
    */
   async deleteLab(id: string): Promise<void> {
     try {
@@ -223,29 +223,50 @@ class LabService {
         throw new Error('Lab not found')
       }
 
-      // Check for related records (mata kuliah)
-      const { data: relatedCourses } = await supabase
+      // STEP 1: Auto-remove lab assignments from mata_kuliah (CASCADE)
+      console.log('🔄 Removing lab assignments from courses...')
+      const { error: unassignError } = await supabase
         .from('mata_kuliah')
-        .select('id')
+        .update({ 
+          lab_room_id: null,
+          updated_at: new Date().toISOString()
+        })
         .eq('lab_room_id', id)
-        .limit(1)
 
-      if (relatedCourses && relatedCourses.length > 0) {
-        throw new Error('Cannot delete lab room that has assigned courses. Remove course assignments first.')
+      if (unassignError) {
+        console.error('❌ Failed to unassign courses:', unassignError)
+        throw new Error(`Failed to unassign courses: ${unassignError.message}`)
       }
 
-      // Delete lab
-      const { error } = await supabase
+      // STEP 2: Also remove from users if any users are assigned to this lab
+      console.log('🔄 Removing lab assignments from users...')
+      const { error: unassignUsersError } = await supabase
+        .from('users')
+        .update({ 
+          lab_room_id: null,
+          updated_at: new Date().toISOString()
+        })
+        .eq('lab_room_id', id)
+
+      if (unassignUsersError) {
+        console.error('❌ Failed to unassign users:', unassignUsersError)
+        // Don't throw error here, just log warning
+        console.warn('⚠️ Some users may still be assigned to this lab')
+      }
+
+      // STEP 3: Delete the lab room
+      console.log('🗑️ Deleting lab room...')
+      const { error: deleteError } = await supabase
         .from('lab_rooms')
         .delete()
         .eq('id', id)
 
-      if (error) {
-        console.error('❌ Lab Service: Delete lab error:', error)
-        throw new Error(`Failed to delete lab: ${error.message}`)
+      if (deleteError) {
+        console.error('❌ Lab Service: Delete lab error:', deleteError)
+        throw new Error(`Failed to delete lab: ${deleteError.message}`)
       }
 
-      console.log('✅ Lab Service: Lab deleted successfully:', existingLab.nama_lab)
+      console.log('✅ Lab Service: Lab deleted successfully with auto-cascade:', existingLab.nama_lab)
 
     } catch (error) {
       console.error('❌ Lab Service: Delete lab exception:', error)
