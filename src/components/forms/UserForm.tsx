@@ -1,4 +1,4 @@
-// src/components/forms/UserForm.tsx
+// src/components/forms/UserForm.tsx - FIXED VERSION
 import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -9,13 +9,23 @@ import { databaseService } from '@/lib/supabase/database'
 
 interface UserFormProps {
   user?: User | null
-  onSubmit: (userData: CreateUserRequest | UpdateUserRequest) => Promise<void>
+  onSubmit: (userData: any) => Promise<void>  // Simplified for now
   onCancel: () => void
   loading?: boolean
 }
 
 interface FormErrors {
   [key: string]: string
+}
+
+interface FormState {
+  email: string
+  full_name: string
+  role: 'admin' | 'dosen' | 'laboran' | 'mahasiswa'
+  nim_nip: string
+  phone: string
+  status: 'active' | 'inactive'
+  lab_room_id: string
 }
 
 const UserForm: React.FC<UserFormProps> = ({
@@ -26,8 +36,8 @@ const UserForm: React.FC<UserFormProps> = ({
 }) => {
   const isEdit = !!user
   
-  // Form state
-  const [formData, setFormData] = useState<CreateUserRequest>({
+  // Form state with proper typing
+  const [formData, setFormData] = useState<FormState>({
     email: '',
     full_name: '',
     role: 'mahasiswa',
@@ -69,15 +79,15 @@ const UserForm: React.FC<UserFormProps> = ({
     loadLabRooms()
   }, [])
 
-  const handleInputChange = (field: keyof CreateUserRequest, value: string) => {
-    setFormData(prev => ({
+  const handleInputChange = (field: keyof FormState, value: string) => {
+    setFormData((prev: FormState) => ({
       ...prev,
       [field]: value
     }))
     
     // Clear field error when user starts typing
     if (errors[field]) {
-      setErrors(prev => ({
+      setErrors((prev: FormErrors) => ({
         ...prev,
         [field]: ''
       }))
@@ -88,18 +98,29 @@ const UserForm: React.FC<UserFormProps> = ({
     const newErrors: FormErrors = {}
 
     try {
+      // Create submission data with proper typing
+      const submissionData: CreateUserRequest = {
+        email: formData.email,
+        full_name: formData.full_name,
+        role: formData.role,
+        nim_nip: formData.nim_nip || undefined,
+        phone: formData.phone || undefined,
+        status: formData.status, // Remove undefined, always has value
+        lab_room_id: formData.lab_room_id || undefined
+      }
+
       // Use appropriate schema based on mode
       const schema = isEdit ? updateUserSchema : createUserSchema
-      const validatedData = schema.parse(formData)
+      schema.parse(submissionData)
 
       // Role-specific validation
-      const roleErrors = validateUserByRole(validatedData)
+      const roleErrors = validateUserByRole(submissionData)
       if (roleErrors.length > 0) {
         newErrors.role = roleErrors[0]
       }
 
       // Email domain validation
-      const emailValidation = validateEmailDomain(validatedData.email, validatedData.role)
+      const emailValidation = validateEmailDomain(submissionData.email, submissionData.role)
       if (!emailValidation.isValid && emailValidation.message) {
         newErrors.email = emailValidation.message
       }
@@ -136,17 +157,22 @@ const UserForm: React.FC<UserFormProps> = ({
     
     try {
       // Prepare data for submission
-      const submitData = { ...formData }
-      
-      // Remove empty strings
-      Object.keys(submitData).forEach(key => {
-        if (submitData[key as keyof CreateUserRequest] === '') {
-          delete submitData[key as keyof CreateUserRequest]
-        }
-      })
+      const submitData: CreateUserRequest | UpdateUserRequest = {
+        email: formData.email,
+        full_name: formData.full_name,
+        role: formData.role,
+        nim_nip: formData.nim_nip || undefined,
+        phone: formData.phone || undefined,
+        status: formData.status,
+        lab_room_id: formData.lab_room_id || undefined
+      }
 
       if (isEdit && user) {
-        await onSubmit({ ...submitData, id: user.id } as UpdateUserRequest)
+        const updateData: UpdateUserRequest = {
+          ...submitData,
+          id: user.id
+        }
+        await onSubmit(updateData)
       } else {
         await onSubmit(submitData)
       }
@@ -280,7 +306,7 @@ const UserForm: React.FC<UserFormProps> = ({
             </label>
             <select
               value={formData.status}
-              onChange={(e) => handleInputChange('status', e.target.value as 'active' | 'inactive')}
+              onChange={(e) => handleInputChange('status', e.target.value)}
               disabled={isFormDisabled}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
             >

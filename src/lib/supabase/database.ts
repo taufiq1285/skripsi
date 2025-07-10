@@ -1,4 +1,4 @@
-// src/lib/supabase/database.ts
+// src/lib/supabase/database.ts - UPDATED VERSION with FIXED TYPES
 import { supabase } from './client'
 import type { User, CreateUserRequest, UpdateUserRequest, UserListParams, UserListResponse } from '@/types/user'
 
@@ -26,7 +26,7 @@ class DatabaseService {
         .select(`
           *,
           lab_room:lab_rooms(id, nama_lab, kode_lab)
-        `)
+        `, { count: 'exact' })
 
       // Apply filters
       if (search) {
@@ -49,11 +49,8 @@ class DatabaseService {
         query = query.eq('lab_room_id', lab_room_id)
       }
 
-      // Get total count
-      const { count } = await query.select('*', { count: 'exact', head: true })
-
-      // Get paginated data
-      const { data, error } = await query
+      // Apply pagination and ordering
+      const { data, error, count } = await query
         .order('created_at', { ascending: false })
         .range(offset, offset + limit - 1)
 
@@ -121,7 +118,7 @@ class DatabaseService {
         .single()
 
       if (existingUser) {
-        throw new Error('Email sudah digunakan')
+        throw new Error('Email already exists')
       }
 
       // Check if NIM/NIP already exists (if provided)
@@ -133,7 +130,7 @@ class DatabaseService {
           .single()
 
         if (existingNimNip) {
-          throw new Error('NIM/NIP sudah digunakan')
+          throw new Error('NIM/NIP already exists')
         }
       }
 
@@ -169,38 +166,41 @@ class DatabaseService {
    */
   async updateUser(id: string, userData: Partial<UpdateUserRequest>): Promise<User> {
     try {
+      // Remove id from userData to avoid updating it
+      const { id: _, ...updateData } = userData
+
       // Check if email is being changed and if it already exists
-      if (userData.email) {
+      if (updateData.email) {
         const { data: existingUser } = await supabase
           .from('users')
           .select('id')
-          .eq('email', userData.email)
+          .eq('email', updateData.email)
           .neq('id', id)
           .single()
 
         if (existingUser) {
-          throw new Error('Email sudah digunakan')
+          throw new Error('Email already exists')
         }
       }
 
       // Check if NIM/NIP is being changed and if it already exists
-      if (userData.nim_nip) {
+      if (updateData.nim_nip) {
         const { data: existingNimNip } = await supabase
           .from('users')
           .select('id')
-          .eq('nim_nip', userData.nim_nip)
+          .eq('nim_nip', updateData.nim_nip)
           .neq('id', id)
           .single()
 
         if (existingNimNip) {
-          throw new Error('NIM/NIP sudah digunakan')
+          throw new Error('NIM/NIP already exists')
         }
       }
 
       const { data, error } = await supabase
         .from('users')
         .update({
-          ...userData,
+          ...updateData,
           updated_at: new Date().toISOString()
         })
         .eq('id', id)
@@ -216,7 +216,7 @@ class DatabaseService {
       }
 
       if (!data) {
-        throw new Error('User tidak ditemukan')
+        throw new Error('User not found')
       }
 
       console.log('✅ Database: User updated successfully:', data.email)
@@ -241,11 +241,10 @@ class DatabaseService {
         .single()
 
       if (!existingUser) {
-        throw new Error('User tidak ditemukan')
+        throw new Error('User not found')
       }
 
-      // Check for related records that would prevent deletion
-      // You might want to implement soft delete instead
+      // Soft delete might be better - for now we'll do hard delete
       const { error } = await supabase
         .from('users')
         .delete()
@@ -284,6 +283,40 @@ class DatabaseService {
 
     } catch (error) {
       console.error('❌ Database: Get lab rooms exception:', error)
+      throw error
+    }
+  }
+
+  /**
+   * Get user statistics
+   */
+  async getUserStats() {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('role, status')
+
+      if (error) {
+        console.error('❌ Database: Get user stats error:', error)
+        throw new Error(`Failed to fetch user statistics: ${error.message}`)
+      }
+
+      const stats = {
+        total: data?.length || 0,
+        active: data?.filter(u => u.status === 'active').length || 0,
+        inactive: data?.filter(u => u.status === 'inactive').length || 0,
+        byRole: {
+          admin: data?.filter(u => u.role === 'admin').length || 0,
+          dosen: data?.filter(u => u.role === 'dosen').length || 0,
+          laboran: data?.filter(u => u.role === 'laboran').length || 0,
+          mahasiswa: data?.filter(u => u.role === 'mahasiswa').length || 0
+        }
+      }
+
+      return stats
+
+    } catch (error) {
+      console.error('❌ Database: Get user stats exception:', error)
       throw error
     }
   }
